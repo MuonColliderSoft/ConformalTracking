@@ -139,6 +139,9 @@ void ConformalTracking::registerParameters() {
                              m_minClustersOnTrackAfterFit, int(4));
   registerProcessorParameter("MaxHitInvertedFit", "Maximum number of track hits to try the inverted fit", m_maxHitsInvFit,
                              int(0));
+  registerProcessorParameter("MaxHitAngle", "Maximum polar angle of hits to be fitted", m_maxHitAngle, double(3.1415927));
+  registerProcessorParameter("MinHitAngle", "Minimum polar angle of hits to be fitted", m_minHitAngle, double(0.));
+
 }
 
 void ConformalTracking::init() {
@@ -191,6 +194,7 @@ void ConformalTracking::init() {
     m_neighY = new TH1F("m_neighY", "m_neighY", 500, -1500, 1500);
     m_neighZ = new TH1F("m_neighZ", "m_neighZ", 500, -2500, 2500);
 
+    m_distance          = new TH1F("m_distance", "m_distance", 1000, 0., 0.025);
     m_slopeZ            = new TH1F("m_slopeZ", "m_slopeZ", 1000, -100, 100);
     m_slopeZ_true       = new TH1F("m_slopeZ_true", "m_slopeZ_true", 1000, -100, 100);
     m_slopeZ_true_first = new TH1F("m_slopeZ_true_first", "m_slopeZ_true_first", 1000, -100, 100);
@@ -408,6 +412,11 @@ void ConformalTracking::processEvent(LCEvent* evt) {
       // Get the hit
       TrackerHitPlane* hit = dynamic_cast<TrackerHitPlane*>(trackerHitCollections[collection]->getElementAt(itHit));
 
+      // Select hits in the region of interest
+      double theta_hit = atan2(sqrt(hit->getPosition()[0]*hit->getPosition()[0]+hit->getPosition()[1]*hit->getPosition()[1]),
+             hit->getPosition()[2]);
+      if ( theta_hit<m_minHitAngle || theta_hit>m_maxHitAngle ) continue;
+
       // Get subdetector information and check if the hit is in the barrel or endcaps
       const int celId = hit->getCellID0();
       m_encoder.setValue(celId);
@@ -594,7 +603,7 @@ void ConformalTracking::processEvent(LCEvent* evt) {
 
   for (auto const& parameters : _stepParameters) {
     runStep(kdClusters, nearestNeighbours, conformalTracks, collectionClusters, parameters);
-    streamlog_out(DEBUG9) << "STEP " << parameters._step << ": nr tracks = " << conformalTracks.size() << std::endl;
+    streamlog_out(MESSAGE9) << "STEP " << parameters._step << ": nr tracks = " << conformalTracks.size() << std::endl;
     if (streamlog_level(DEBUG9)) {
       for (auto const& confTrack : conformalTracks) {
         streamlog_out(DEBUG9) << "- Track " << &confTrack << " has " << confTrack->m_clusters.size() << " hits" << std::endl;
@@ -1049,6 +1058,7 @@ void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKD
         m_neighX->Fill(nhit->getX());
         m_neighY->Fill(nhit->getY());
         m_neighZ->Fill(nhit->getZ());
+        m_distance->Fill(sqrt(length2));
 
         double distanceX = nhit->getX() - kdhit->getX();
         double distanceY = nhit->getY() - kdhit->getY();
