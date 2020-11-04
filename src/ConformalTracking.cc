@@ -240,6 +240,36 @@ void ConformalTracking::init() {
         new TCanvas("canvConformalEventDisplayMCunreconstructed", "canvConformalEventDisplayMCunreconstructed");
   }
 
+  // Initialize timing monitoring histograms
+  if (m_debugTime) {
+    for (auto const& parameters : _stepParameters) {
+      char axes[100];
+      sprintf(axes, ";Time [ms];Step %d iterations", parameters._step);
+      char hname[100];
+
+      sprintf(hname, "timing_buildNewTracks_%d", parameters._step);
+      m_timing_buildNewTracks.push_back(new TH1F(hname, axes, 1e4, 0, 1e7));
+      sprintf(hname, "timing_buildNewTracks_neighbourSearch_%d", parameters._step);
+      m_timing_buildNewTracks_neighbourSearch.push_back(new TH1F(hname, axes, 1e4, 0, 1e4));
+      sprintf(hname, "timing_buildNewTracks_seeding_%d", parameters._step);
+      m_timing_buildNewTracks_seeding.push_back(new TH1F(hname, axes, 1e4, 0, 10));
+      sprintf(hname, "timing_buildNewTracks_extending_%d", parameters._step);
+      m_timing_buildNewTracks_extending.push_back(new TH1F(hname, axes, 1e4, 0, 5e3));
+      sprintf(hname, "timing_buildNewTracks_fitting_%d", parameters._step);
+      m_timing_buildNewTracks_fitting.push_back(new TH1F(hname, axes, 1e4, 0, 1e2));
+      sprintf(hname, "timing_buildNewTracks_seed_sort_%d", parameters._step);
+      m_timing_buildNewTracks_seed_sort.push_back(new TH1F(hname, axes, 1e4, 0, 10));
+      sprintf(hname, "timing_buildNewTracks_seed_total_%d", parameters._step);
+      m_timing_buildNewTracks_seed_total.push_back(new TH1F(hname, axes, 1e4, 0, 5e3));
+      sprintf(hname, "timing_extendTracks_%d", parameters._step);
+      m_timing_extendTracks.push_back(new TH1F(hname, axes, 1e4, 0, 1e7));
+      sprintf(hname, "timing_extendTracks_extendTracksPerLayer_%d", parameters._step);
+      m_timing_extendTracks_extendTracksPerLayer.push_back(new TH1F(hname, axes, 1e4, 0, 1e2));
+      sprintf(hname, "timing_extendTracks_extendTrack_%d", parameters._step);
+      m_timing_extendTracks_extendTrack.push_back(new TH1F(hname, axes, 1e4, 0, 1e2));
+    }
+  }
+
   // Register this process
   Global::EVENTSEEDER->registerProcessor(this);
 }
@@ -927,11 +957,13 @@ void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKD
   // Sort the input collection by radius - higher to lower if starting with the vertex detector (high R in conformal space)
   std::sort(collection.begin(), collection.end(), (vertexToTracker ? sort_by_radiusKD : sort_by_lower_radiusKD));
 
+  auto stopwatch_hit       = TStopwatch();
+  auto stopwatch_hit_total = TStopwatch();
   // Loop over all hits, using each as a seed to produce a new track
   unsigned int nKDHits = collection.size();
   for (unsigned int nKDHit = 0; nKDHit < nKDHits; nKDHit++) {
-    auto stopwatch_hit       = TStopwatch();
-    auto stopwatch_hit_total = TStopwatch();
+    stopwatch_hit.Start(true);
+    stopwatch_hit_total.Start(true);
 
     // Get the kdHit and check if it has already been used (assigned to a track)
     SKDCluster kdhit = collection[nKDHit];
@@ -952,9 +984,11 @@ void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKD
     }
 
     // Debug: Plot residuals between hit and associated SimTrackerHit
-    streamlog_out(DEBUG7) << "SimHit : [x,y,z] = [" << kdSimHits[kdhit]->getPosition()[0] << ", "
-                          << kdSimHits[kdhit]->getPosition()[1] << ", " << kdSimHits[kdhit]->getPosition()[2] << "] "
-                          << std::endl;
+    if (m_debugPlots) {
+      streamlog_out(DEBUG7) << "SimHit : [x,y,z] = [" << kdSimHits[kdhit]->getPosition()[0] << ", "
+                            << kdSimHits[kdhit]->getPosition()[1] << ", " << kdSimHits[kdhit]->getPosition()[2] << "] "
+                            << std::endl;
+    }
     //      if(kdhit->getR() < 0.003) break; // new cut - once we get to inner radius we will never make tracks. temp? TODO: make parameter? FCC (0.005 to 0.003)
 
     // The tracking differentiates between the first and all subsequent hits on a chain.
@@ -1003,9 +1037,12 @@ void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKD
             return false;
           });
 
-    if (m_debugTime)
-      streamlog_out(DEBUG9) << "  Time report: Searching for " << results.size() << " neighbours took "
-                            << stopwatch_hit.RealTime() * 1000 << std::scientific << " milli-seconds" << std::endl;
+    stopwatch_hit.Stop();
+    if (m_debugTime) {
+      streamlog_out(DEBUG8) << "  Time report: Searching for " << results.size() << " neighbours took "
+                            << stopwatch_hit.CpuTime() * 1e3 << std::scientific << " ms" << std::endl;
+      m_timing_buildNewTracks_neighbourSearch.at(parameters._step)->Fill(stopwatch_hit.CpuTime()*1e3);
+    }
     stopwatch_hit.Start(true);
 
     streamlog_out(DEBUG9) << "Picked up " << results.size() << " neighbours from " << (radialSearch ? "radial" : "theta")
@@ -1108,9 +1145,12 @@ void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKD
       }
     }
 
-    if (m_debugTime)
-      streamlog_out(DEBUG9) << "  Time report: Making " << cells.size() << " seed cells took "
-                            << stopwatch_hit.RealTime() * 1000 << std::scientific << " milli-seconds" << std::endl;
+    stopwatch_hit.Stop();
+    if (m_debugTime) {
+      streamlog_out(DEBUG8) << "  Time report: Making " << cells.size() << " seed cells took "
+                            << stopwatch_hit.CpuTime() * 1e3 << std::scientific << " ms" << std::endl;
+      m_timing_buildNewTracks_seeding.at(parameters._step)->Fill(stopwatch_hit.CpuTime()*1e3);
+    }
     stopwatch_hit.Start(true);
 
     streamlog_out(DEBUG9) << "Produced " << cells.size() << " seed cells from seed hit A ([x,y] = [" << kdhit->getX() << ", "
@@ -1124,15 +1164,14 @@ void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKD
 
     // All seed cells have been created, now try create all "downstream" cells until no more can be added
     SharedKDClusters debugHits;
-    if (debugSeed && kdhit == debugSeed) {
-      extendSeedCells(cells, nearestNeighbours, true, debugHits, parameters, vertexToTracker);
-    } else {
-      extendSeedCells(cells, nearestNeighbours, true, debugHits, parameters, vertexToTracker);
-    }
+    extendSeedCells(cells, nearestNeighbours, true, debugHits, parameters, vertexToTracker);
 
-    if (m_debugTime)
-      streamlog_out(DEBUG9) << "  Time report: Extending " << cells.size() << " seed cells took "
-                            << stopwatch_hit.RealTime() * 1000 << std::scientific << " milli-seconds" << std::endl;
+    stopwatch_hit.Stop();
+    if (m_debugTime) {
+      streamlog_out(DEBUG8) << "  Time report: Extending " << cells.size() << " seed cells took "
+                            << stopwatch_hit.CpuTime() * 1e3 << std::scientific << " ms" << std::endl;
+      m_timing_buildNewTracks_extending.at(parameters._step)->Fill(stopwatch_hit.CpuTime()*1e3);
+    }
     stopwatch_hit.Start(true);
 
     streamlog_out(DEBUG9) << "After extension, have " << cells.size() << " cells from seed hit A ([x,y] = [" << kdhit->getX()
@@ -1229,10 +1268,13 @@ void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKD
                         std::make_move_iterator(bestTracks.end()));
     }
 
+    stopwatch_hit.Stop();
     streamlog_out(DEBUG9) << "Final number of fitted tracks to this seed hit: " << cellTracks.size() << std::endl;
-    if (m_debugTime)
-      streamlog_out(DEBUG9) << "  Time report: " << cellTracks.size() << " tracks reconstructed from cells took "
-                            << stopwatch_hit.RealTime() * 1000 << std::scientific << " milli-seconds" << std::endl;
+    if (m_debugTime) {
+      streamlog_out(DEBUG8) << "  Time report: " << cellTracks.size() << " tracks reconstructed from cells took "
+                            << stopwatch_hit.CpuTime() * 1e3 << std::scientific << " ms" << std::endl;
+      m_timing_buildNewTracks_fitting.at(parameters._step)->Fill(stopwatch_hit.CpuTime()*1e3);
+    }
     stopwatch_hit.Start(true);
 
     // All tracks leading back to the seed hit have now been found. Decide which are the feasible candidates (may be more than 1)
@@ -1358,12 +1400,18 @@ void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKD
       }
 
     }  // end for besttracks
-    if (m_debugTime)
-      streamlog_out(DEBUG9) << "  Time report: Sort best tracks took " << stopwatch_hit.RealTime() * 1000 << std::scientific
-                            << " milli-seconds" << std::endl;
-    if (m_debugTime)
-      streamlog_out(DEBUG9) << " Time report: Total time for seed hit " << nKDHit << " = "
-                            << stopwatch_hit_total.RealTime() * 1000 << std::scientific << " milli-seconds" << std::endl;
+
+    stopwatch_hit.Stop();
+    stopwatch_hit_total.Stop();
+    if (m_debugTime) {
+      streamlog_out(DEBUG8) << "  Time report: Sort best tracks took " << stopwatch_hit.CpuTime() * 1e3 << std::scientific
+                            << " ms" << std::endl;
+      m_timing_buildNewTracks_seed_sort.at(parameters._step)->Fill(stopwatch_hit.CpuTime()*1e3);
+
+      streamlog_out(MESSAGE0) << " Time report: Total time for seed hit " << nKDHit << "/" << nKDHits << " = "
+                            << stopwatch_hit_total.CpuTime() * 1e3 << std::scientific << " ms" << std::endl;
+      m_timing_buildNewTracks_seed_total.at(parameters._step)->Fill(stopwatch_hit_total.CpuTime()*1e3);
+    }
   }
 }
 
@@ -1408,9 +1456,11 @@ void ConformalTracking::extendTracks(UniqueKDTracks& conformalTracks, SharedKDCl
   }
 
   //index just for debug
-  int debug_idxTrack = 0;
+  int debug_idxTrack = -1;
 
+  auto stopwatch_trk = TStopwatch();
   for (auto& track : conformalTracks) {
+    stopwatch_trk.Start(true);
     // Make sure that track hits are ordered from largest to smallest radius
     std::sort(track->m_clusters.begin(), track->m_clusters.end(), sort_by_radiusKD);
 
@@ -1423,6 +1473,7 @@ void ConformalTracking::extendTracks(UniqueKDTracks& conformalTracks, SharedKDCl
 
     // Get the associated MC particle
     MCParticle* associatedParticle = nullptr;
+    debug_idxTrack++;
     if (m_debugPlots) {
       associatedParticle = m_debugger.getAssociatedParticle(track);
       if (associatedParticle == nullptr)
@@ -1437,7 +1488,6 @@ void ConformalTracking::extendTracks(UniqueKDTracks& conformalTracks, SharedKDCl
                             << ". pt estimate: " << track->pt() << " chi2/ndof " << track->chi2ndof() << " and chi2/ndof ZS "
                             << track->chi2ndofZS() << std::endl;
     }
-    debug_idxTrack++;
 
     // Create a seed cell (connecting the first two hits in the track vector - those at smallest conformal radius)
     int  nclusters = track->m_clusters.size();
@@ -1550,6 +1600,13 @@ void ConformalTracking::extendTracks(UniqueKDTracks& conformalTracks, SharedKDCl
       bestCluster = nullptr;
     }
 
+    stopwatch_trk.Stop();
+    if (m_debugTime) {
+      streamlog_out(MESSAGE0) << "Time report: Extending low-Pt track " << debug_idxTrack << "/" << nTracks << " = "
+                              << stopwatch_trk.CpuTime() * 1e3 << std::scientific << " ms" << std::endl;
+      m_timing_extendTracks_extendTrack.at(parameters._step)->Fill(stopwatch_trk.CpuTime());
+    }
+
   }  // End of loop over tracks
 }
 
@@ -1583,6 +1640,8 @@ void ConformalTracking::extendSeedCells(SharedCells& cells, UKDTree& nearestNeig
       double            searchDistance = parameters._maxDistance;  //hit->getR();
       if (searchDistance > hit->getR())
         searchDistance = 1.2 * hit->getR();
+
+      streamlog_out(DEBUG8) << " - Using searchDistance: " << searchDistance << "  at hit R: " << hit->getR() << std::endl;
 
       // Extrapolate along the cell and then make a 2D nearest neighbour search at this extrapolated point
       SKDCluster const& fakeHit =
@@ -1686,7 +1745,7 @@ void ConformalTracking::extendSeedCells(SharedCells& cells, UKDTree& nearestNeig
           //            drawline(hit,nhit,cells[itCell]->getWeight()+2,3);
           //          }
 
-          streamlog_out(DEBUG8) << "-- cell angle too large. Discarded! " << std::endl;
+          streamlog_out(DEBUG8) << "-- cell angle too large: " << cells[itCell]->getAngle(cell) << "; " << cells[itCell]->getAngleRZ(cell) << "; Discarded!" << std::endl;
 
           if (extendingTrack)
             streamlog_out(DEBUG7) << "-- discarded!" << std::endl;
@@ -1840,26 +1899,27 @@ void ConformalTracking::extendTracksPerLayer(UniqueKDTracks& conformalTracks, Sh
   streamlog_out(DEBUG9) << "*** extendTracksPerLayer: extending " << conformalTracks.size()
                         << " tracks layer by layer, into " << collection.size() << " hits" << std::endl;
 
-  if (collection.size() == 0)
-    return;
+  if (collection.size() == 0) return;
 
   int nTracks = conformalTracks.size();
   streamlog_out(DEBUG9) << "Total number of tracks = " << nTracks << std::endl;
 
   //index just for debug
-  int debug_idxTrack = 0;
+  int debug_idxTrack = -1;
 
   // Sort the input collection by layer
   std::sort(collection.begin(), collection.end(), (vertexToTracker ? sort_by_layer : sort_by_lower_layer));
 
+  auto stopwatch_trk = TStopwatch();
   // Loop over all tracks
   for (auto& track : conformalTracks) {
-    streamlog_out(DEBUG9) << "Track " << debug_idxTrack << std::endl;
+    stopwatch_trk.Start(true);
+
     debug_idxTrack++;
+    streamlog_out(DEBUG9) << "Track " << debug_idxTrack << std::endl;
 
     // Only look at high pt tracks
-    if (track->pt() < parameters._highPTcut)
-      continue;
+    if (track->pt() < parameters._highPTcut) continue;
 
     // Make sure that the hits are ordered in KDradius
     std::sort(track->m_clusters.begin(), track->m_clusters.end(),
@@ -2149,6 +2209,13 @@ void ConformalTracking::extendTracksPerLayer(UniqueKDTracks& conformalTracks, Sh
                               << track->m_clusters.at(i)->getSubdetector() << ", " << track->m_clusters.at(i)->getLayer()
                               << "]" << std::endl;
       }
+    }
+
+    stopwatch_trk.Stop();
+    if (m_debugTime) {
+      streamlog_out(MESSAGE0) << "Time report: Extending per-layer track " << debug_idxTrack << "/" << nTracks << " = "
+                              << stopwatch_trk.CpuTime() * 1e3 << std::scientific << " ms" << std::endl;
+      m_timing_extendTracks_extendTracksPerLayer.at(parameters._step)->Fill(stopwatch_trk.CpuTime());
     }
 
   }  // end loop on tracks
@@ -2998,17 +3065,21 @@ void ConformalTracking::runStep(SharedKDClusters& kdClusters, UKDTree& nearestNe
     } while (caughtException);
 
     stopwatch.Stop();
-    if (m_debugTime)
-      streamlog_out(DEBUG9) << "Step " << parameters._step << " buildNewTracks took " << stopwatch.RealTime() << " seconds"
+    if (m_debugTime) {
+      streamlog_out(MESSAGE0) << "Step " << parameters._step << " buildNewTracks took " << stopwatch.CpuTime() << " seconds"
                             << std::endl;
+      m_timing_buildNewTracks.at(parameters._step)->Fill(stopwatch.CpuTime()*1e3);
+    }
     stopwatch.Reset();
   }
   if (parameters._extend) {
     extendTracks(conformalTracks, kdClusters, nearestNeighbours, parameters);
     stopwatch.Stop();
-    if (m_debugTime)
-      streamlog_out(DEBUG9) << "Step " << parameters._step << " extendTracks took " << stopwatch.RealTime() << " seconds"
+    if (m_debugTime) {
+      streamlog_out(MESSAGE0) << "Step " << parameters._step << " extendTracks took " << stopwatch.CpuTime() << " seconds"
                             << std::endl;
+      m_timing_extendTracks.at(parameters._step)->Fill(stopwatch.CpuTime()*1e3);
+    }
     stopwatch.Reset();
   }
 

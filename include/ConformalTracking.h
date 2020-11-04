@@ -199,6 +199,17 @@ protected:
   TH2F* m_xyDistribution  = nullptr;
   TH3F* m_xyzDistribution = nullptr;
 
+  std::vector<TH1F*> m_timing_buildNewTracks{};
+  std::vector<TH1F*> m_timing_buildNewTracks_neighbourSearch{};
+  std::vector<TH1F*> m_timing_buildNewTracks_seeding{};
+  std::vector<TH1F*> m_timing_buildNewTracks_extending{};
+  std::vector<TH1F*> m_timing_buildNewTracks_fitting{};
+  std::vector<TH1F*> m_timing_buildNewTracks_seed_sort{};
+  std::vector<TH1F*> m_timing_buildNewTracks_seed_total{};
+  std::vector<TH1F*> m_timing_extendTracks{};
+  std::vector<TH1F*> m_timing_extendTracks_extendTracksPerLayer{};
+  std::vector<TH1F*> m_timing_extendTracks_extendTrack{};
+
   // Other constants
   double            m_thetaRange                 = 0.0;
   double            m_chi2cut                    = 0.0;
