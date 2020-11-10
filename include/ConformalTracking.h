@@ -76,8 +76,8 @@ public:
   virtual void parseStepParameters();
 
   // Track finding
-  void buildNewTracks(UniqueKDTracks&, SharedKDClusters&, UKDTree&, Parameters const&, bool radialSearch = false,
-                      bool vertexToTracker = true);
+  void buildNewTracks(UniqueKDTracks&, SharedKDClusters&, SharedKDClusters&, UKDTree&, Parameters const&,
+                      bool radialSearch = false, bool vertexToTracker = true);
   bool neighbourIsCompatible(const SKDCluster& neighbourHit, const SKDCluster& seedHit, const double slopeZRange);
   void extendTracks(UniqueKDTracks&, SharedKDClusters&, UKDTree&, Parameters const&);
   void combineCollections(SharedKDClusters&, UKDTree&, std::vector<int> const&, std::map<int, SharedKDClusters> const&);
@@ -199,6 +199,16 @@ protected:
   TH2F* m_xyDistribution  = nullptr;
   TH3F* m_xyzDistribution = nullptr;
 
+  // Conformal search histograms
+  std::vector<TH1F*> m_search_cell_angle{};
+  std::vector<TH1F*> m_search_cell_angleRZ{};
+  std::vector<TH1F*> m_search_cell_slopeZ{};
+  std::vector<TH1F*> m_search_cell_length{};
+  std::vector<TH1F*> m_search_track_nClusters{};
+  std::vector<TH1F*> m_search_track_chi2{};
+  std::vector<TH1F*> m_search_track_chi2ZS{};
+
+  // Timing histograms
   std::vector<TH1F*> m_timing_buildNewTracks{};
   std::vector<TH1F*> m_timing_buildNewTracks_neighbourSearch{};
   std::vector<TH1F*> m_timing_buildNewTracks_seeding{};

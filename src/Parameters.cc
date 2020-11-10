@@ -9,6 +9,7 @@ bool findEntry(std::vector<std::string> const& functions, std::string const& ent
 
 Parameters::Parameters(ParameterParser::ParsedParameters const& ps, std::vector<std::string> const& allCollections, int step)
     : _collections({}),
+      _seedCollections({}),
       _maxCellAngle(ps._parameters.at("MaxCellAngle")),
       _maxCellAngleRZ(ps._parameters.at("MaxCellAngleRZ")),
       _chi2cut(ps._parameters.at("Chi2Cut")),
@@ -26,7 +27,14 @@ Parameters::Parameters(ParameterParser::ParsedParameters const& ps, std::vector<
       _build(findEntry(ps._functions, "BuildNewTracks")),
       _extend(findEntry(ps._functions, "ExtendTracks")),
       _sortTracks(findEntry(ps._functions, "SortTracks")) {
-  for (auto const& colName : ps._collections) {
+  for (auto const& fullColName : ps._collections) {
+    std::string colName(fullColName);
+    bool skipFromSeed(false);
+    // Stripping potential "-" from the beginning
+    if (colName.at(0) == '-') {
+      colName = colName.substr(1);
+      skipFromSeed = true;
+    }
     auto it = std::find(allCollections.begin(), allCollections.end(), colName);
     if (it == allCollections.end()) {
       std::stringstream error;
@@ -34,6 +42,7 @@ Parameters::Parameters(ParameterParser::ParsedParameters const& ps, std::vector<
       throw marlin::ParseException(error.str());
     }
     _collections.push_back(it - allCollections.begin());
+    if (!skipFromSeed) _seedCollections.push_back(it - allCollections.begin());
 
     check(ps._parameters, _existingParameters, "Parameter");
     check(ps._functions, _existingFunctions, "Function");

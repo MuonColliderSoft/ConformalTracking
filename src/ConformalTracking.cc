@@ -240,6 +240,28 @@ void ConformalTracking::init() {
         new TCanvas("canvConformalEventDisplayMCunreconstructed", "canvConformalEventDisplayMCunreconstructed");
   }
 
+  // Initialize conformal search histograms
+  if (m_debugPlots) {
+    for (auto const& parameters : _stepParameters) {
+      char hname[100];
+      sprintf(hname, "search_angle_%d", parameters._step);
+      m_search_cell_angle.push_back(new TH1F(hname, ";Cell angle;Cells", 1e3, 0., 0.1));
+      sprintf(hname, "search_angleRZ_%d", parameters._step);
+      m_search_cell_angleRZ.push_back(new TH1F(hname, ";Cell angleRZ;Cells", 1e3, 0., 0.1));
+      sprintf(hname, "search_slopeZ_%d", parameters._step);
+      m_search_cell_slopeZ.push_back(new TH1F(hname, ";slopeZ;Cells", 2e3, -20, 20));
+      sprintf(hname, "search_length_%d", parameters._step);
+      m_search_cell_length.push_back(new TH1F(hname, ";Length;Cells", 1e3, 0., 0.1));
+      sprintf(hname, "search_nClusters_%d", parameters._step);
+      m_search_track_nClusters.push_back(new TH1F(hname, ";# clusters;Conformal tracks", 30, 0, 30));
+      sprintf(hname, "search_chi2_%d", parameters._step);
+      m_search_track_chi2.push_back(new TH1F(hname, ";#chi^{2}/NDF;Conformal tracks", 2e3, 0, 200));
+      sprintf(hname, "search_chi2ZS_%d", parameters._step);
+      m_search_track_chi2ZS.push_back(new TH1F(hname, ";#chi^{2}_{ZS}/NDF;Conformal tracks", 2e3, 0, 200));
+
+    }
+  }
+
   // Initialize timing monitoring histograms
   if (m_debugTime) {
     for (auto const& parameters : _stepParameters) {
@@ -279,53 +301,53 @@ void ConformalTracking::parseStepParameters() {
 
   int step = 0;
   // Build tracks in the vertex barrel
-  Parameters initialParameters(m_vertexBarrelHits, m_maxCellAngle, m_maxCellAngleRZ, m_chi2cut, m_minClustersOnTrack,
+  Parameters initialParameters(m_vertexBarrelHits, m_vertexBarrelHits,m_maxCellAngle, m_maxCellAngleRZ, m_chi2cut, m_minClustersOnTrack,
                                m_maxDistance, m_slopeZRange, m_highPTcut, /*highPT*/ true, /*OnlyZS*/ false,
                                /*rSearch*/ false,
                                /*vtt*/ true, /*kalmanFitForward*/ true, step++,
                                /*combine*/ true, /*build*/ true, /*extend*/ false, /*sort*/ false);
   // Extend through the endcap
-  Parameters parameters2(m_vertexEndcapHits, m_maxCellAngle, m_maxCellAngleRZ, m_chi2cut, m_minClustersOnTrack,
+  Parameters parameters2(m_vertexEndcapHits, m_vertexEndcapHits, m_maxCellAngle, m_maxCellAngleRZ, m_chi2cut, m_minClustersOnTrack,
                          m_maxDistance, m_slopeZRange, m_highPTcut, /*highPT*/ true, /*OnlyZS*/ false,
                          /*rSearch*/ false, /*vtt*/ true,
                          /*kalmanFitForward*/ true, step++,
                          /*combine*/ true, /*build*/ false, /*extend*/ true, /*sort*/ false);
   // Make combined vertex tracks
-  Parameters parametersTCVC(m_vertexCombinedHits, m_maxCellAngle, m_maxCellAngleRZ, m_chi2cut, m_minClustersOnTrack,
+  Parameters parametersTCVC(m_vertexCombinedHits, m_vertexCombinedHits, m_maxCellAngle, m_maxCellAngleRZ, m_chi2cut, m_minClustersOnTrack,
                             m_maxDistance, m_slopeZRange, m_highPTcut, /*highPT*/ true, /*OnlyZS*/ false,
                             /*rSearch*/ false, /*vtt*/ true,
                             /*kalmanFitForward*/ true, step++,
                             /*combine*/ true, /*build*/ true, /*extend*/ false, /*sort*/ false);
   // Make leftover tracks in the vertex with lower requirements
   // 1. open the cell angles
-  Parameters lowerCellAngleParameters(m_vertexCombinedHits, m_maxCellAngle * 5.0, m_maxCellAngleRZ * 5.0, m_chi2cut,
+  Parameters lowerCellAngleParameters(m_vertexCombinedHits, m_vertexCombinedHits, m_maxCellAngle * 5.0, m_maxCellAngleRZ * 5.0, m_chi2cut,
                                       m_minClustersOnTrack, m_maxDistance, m_slopeZRange, m_highPTcut,
                                       /*highPT*/ true, /*OnlyZS*/ false,
                                       /*rSearch*/ true, /*vtt*/ true, /*kalmanFitForward*/ true, step++,
                                       /*combine*/ not m_enableTCVC, /*build*/ true, /*extend*/ false, /*sort*/ false);
   // 2. open further the cell angles and increase the chi2cut
-  Parameters lowerCellAngleParameters2({}, m_maxCellAngle * 10.0, m_maxCellAngleRZ * 10.0, m_chi2cut * 20.0,
+  Parameters lowerCellAngleParameters2({}, {}, m_maxCellAngle * 10.0, m_maxCellAngleRZ * 10.0, m_chi2cut * 20.0,
                                        m_minClustersOnTrack, m_maxDistance, m_slopeZRange, m_highPTcut,
                                        /*highPT*/ true, /*OnlyZS*/ false,
                                        /*rSearch*/ true, /*vtt*/ true, /*kalmanFitForward*/ true, step++,
                                        /*combine*/ false, /*build*/ true, /*extend*/ false, /*sort*/ false);
   // 3. min number of hits on the track = 4
 
-  Parameters lowNumberHitsParameters({}, m_maxCellAngle * 10.0, m_maxCellAngleRZ * 10.0, m_chi2cut * 20.0,
+  Parameters lowNumberHitsParameters({}, {}, m_maxCellAngle * 10.0, m_maxCellAngleRZ * 10.0, m_chi2cut * 20.0,
                                      /*m_minClustersOnTrack*/ 4, m_maxDistance, m_slopeZRange, m_highPTcut,
                                      /*highPT*/ true,
                                      /*OnlyZS*/ false,
                                      /*rSearch*/ true, /*vtt*/ true, /*kalmanFitForward*/ true, step++,
                                      /*combine*/ false, /*build*/ true, /*extend*/ false, /*sort*/ true);
   // Extend through inner and outer trackers
-  Parameters trackerParameters(m_trackerHits, m_maxCellAngle * 10.0, m_maxCellAngleRZ * 10.0, m_chi2cut * 20.0,
+  Parameters trackerParameters(m_trackerHits, m_trackerHits, m_maxCellAngle * 10.0, m_maxCellAngleRZ * 10.0, m_chi2cut * 20.0,
                                /*m_minClustersOnTrack*/ 4, m_maxDistance, m_slopeZRange, /*highPTcut*/ 1.0,
                                /*highPT*/ true,
                                /*OnlyZS*/ false,
                                /*rSearch*/ true, /*vtt*/ true, /*kalmanFitForward*/ true, step++,
                                /*combine*/ true, /*build*/ false, /*extend*/ true, /*sort*/ false);
   // Finally reconstruct displaced tracks
-  Parameters displacedParameters(m_allHits, m_maxCellAngle * 10.0, m_maxCellAngleRZ * 10.0, m_chi2cut * 10.0,
+  Parameters displacedParameters(m_allHits, m_allHits, m_maxCellAngle * 10.0, m_maxCellAngleRZ * 10.0, m_chi2cut * 10.0,
                                  /*m_minClustersOnTrack*/ 5, 0.015, m_slopeZRange, m_highPTcut,
                                  /*highPT*/ false, /*OnlyZS*/ true,
                                  /*rSearch*/ true,
@@ -625,6 +647,48 @@ void ConformalTracking::processEvent(LCEvent* evt) {
   for (auto const& parameters : _stepParameters) {
     runStep(kdClusters, nearestNeighbours, conformalTracks, collectionClusters, parameters);
     streamlog_out(DEBUG9) << "STEP " << parameters._step << ": nr tracks = " << conformalTracks.size() << std::endl;
+
+    // Filling debug plots with track/cell properties
+    if (m_debugPlots) {
+      for (auto const& confTrack : conformalTracks) {
+        m_search_track_nClusters.at(parameters._step)->Fill(confTrack->m_clusters.size());
+        m_search_track_chi2.at(parameters._step)->Fill(confTrack->chi2ndof());
+        m_search_track_chi2ZS .at(parameters._step)->Fill(confTrack->chi2ndofZS());
+        if (confTrack->m_clusters.size() < 3) continue;
+        // Creating cells for each pair of consecutive hits in the track
+        SCell cell0 = nullptr;
+        SCell cell1 = nullptr;
+        for (unsigned int ht = 0; ht < confTrack->m_clusters.size()-1; ht++) {
+          // Get the conformal clusters
+          const SKDCluster& cl0 = confTrack->m_clusters.at(ht);
+          const SKDCluster& cl1 = confTrack->m_clusters.at(ht+1);
+
+          // Calculating slopeZ between the two hits
+          double dX = cl1->getX() - cl0->getX();
+          double dY = cl1->getY() - cl0->getY();
+          double dZ = cl1->getZ() - cl0->getZ();
+          double slopeZ = dZ / sqrt(dX * dX + dY * dY);
+          m_search_cell_slopeZ.at(parameters._step)->Fill(slopeZ);
+
+          // Making a cell connecting the two hits
+          cell1 = std::make_shared<Cell>(cl0, cl1);
+          cell1->setWeight(ht);
+
+          double cell_length = sqrt(pow(cl0->getU() - cl1->getU(), 2) + pow(cl0->getV() - cl1->getV(), 2));
+          m_search_cell_length.at(parameters._step)->Fill(cell_length);
+
+          // Calculating angles between the previous and this cell
+          if (cell0) {
+            double angle = cell0->getAngle(cell1);
+            double angleRZ = cell0->getAngleRZ(cell1);
+            m_search_cell_angle.at(parameters._step)->Fill(angle);
+            m_search_cell_angleRZ.at(parameters._step)->Fill(angleRZ);
+          }
+          cell0 = SCell(cell1);
+        }
+      }
+    }
+
     if (streamlog_level(DEBUG9)) {
       for (auto const& confTrack : conformalTracks) {
         streamlog_out(DEBUG9) << "- Track " << &confTrack << " has " << confTrack->m_clusters.size() << " hits" << std::endl;
@@ -949,10 +1013,11 @@ void ConformalTracking::combineCollections(SharedKDClusters& kdClusters, UKDTree
 }
 
 // Take a collection of hits and try to produce tracks out of them
-void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKDClusters& collection,
+void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKDClusters& collection, SharedKDClusters& seedCollection,
                                        UKDTree& nearestNeighbours, Parameters const& parameters, bool radialSearch,
                                        bool vertexToTracker) {
   streamlog_out(DEBUG9) << "*** buildNewTracks" << std::endl;
+  streamlog_out(DEBUG9) << "Seeding from " << seedCollection.size() << " hits in a collection of total " << collection.size() << " hits" << std::endl;
 
   // Sort the input collection by radius - higher to lower if starting with the vertex detector (high R in conformal space)
   std::sort(collection.begin(), collection.end(), (vertexToTracker ? sort_by_radiusKD : sort_by_lower_radiusKD));
@@ -970,6 +1035,12 @@ void ConformalTracking::buildNewTracks(UniqueKDTracks& conformalTracks, SharedKD
 
     streamlog_out(DEBUG9) << "Seed hit " << nKDHit << ": [x,y,z] = [" << kdhit->getX() << ", " << kdhit->getY() << ", "
                           << kdhit->getZ() << "]" << std::endl;
+    // Skipping if the hit is not present in the seeding collection
+    if (std::find(seedCollection.begin(), seedCollection.end(), kdhit) == seedCollection.end()) {
+      streamlog_out(DEBUG7) << "hit not in the seeding collection" << std::endl;
+      continue;
+    }
+
     if (m_debugPlots) {
       m_X->Fill(kdhit->getX());
       m_Y->Fill(kdhit->getY());
@@ -3048,10 +3119,15 @@ void ConformalTracking::runStep(SharedKDClusters& kdClusters, UKDTree& nearestNe
   if (parameters._build) {
     bool       caughtException = false;
     Parameters thisParameters(parameters);
+    // Creating a subset collection with clusters that should be used as first seed hits (improves seeding performance)
+    SharedKDClusters kdSeedClusters;
+    for (auto& colId : parameters._seedCollections) {
+      kdSeedClusters.insert(kdSeedClusters.end(), collectionClusters.at(colId).begin(), collectionClusters.at(colId).end());
+    }
     do {
       caughtException = false;
       try {
-        buildNewTracks(conformalTracks, kdClusters, nearestNeighbours, thisParameters, parameters._radialSearch,
+        buildNewTracks(conformalTracks, kdClusters, kdSeedClusters, nearestNeighbours, thisParameters, parameters._radialSearch,
                        parameters._vertexToTracker);
       } catch (TooManyTracksException& e) {
         streamlog_out(MESSAGE) << "caught too many tracks, tightening parameters" << std::endl;
