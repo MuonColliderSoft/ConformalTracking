@@ -124,7 +124,8 @@ void ConformalTracking::registerParameters() {
   registerOutputCollection(LCIO::TRACKERHITPLANE, "DebugHits", "DebugHits", m_outputDebugHits, std::string("DebugHits"));
 
   registerProcessorParameter("DebugPlots", "Plots for debugging the tracking", m_debugPlots, bool(false));
-  registerProcessorParameter("DebugTiming", "Print out time profile", m_debugTime, bool(false));
+  registerProcessorParameter("DebugSteps", "Plots for debugging each tracking step", m_debugSteps, bool(false));
+  registerProcessorParameter("DebugTiming", "Print and fill plots with time profiles", m_debugTime, bool(false));
 
   // Parameters for tracking
   registerProcessorParameter("RetryTooManyTracks", "retry with tightened parameters, when too many tracks are being created",
@@ -241,22 +242,24 @@ void ConformalTracking::init() {
   }
 
   // Initialize conformal search histograms
-  if (m_debugPlots) {
+  if (m_debugSteps) {
     for (auto const& parameters : _stepParameters) {
       char hname[100];
-      sprintf(hname, "search_angle_%d", parameters._step);
+      sprintf(hname, "search_cell_angle_%d", parameters._step);
       m_search_cell_angle.push_back(new TH1F(hname, ";Cell angle;Cells", 1e3, 0., 0.1));
-      sprintf(hname, "search_angleRZ_%d", parameters._step);
+      sprintf(hname, "search_cell_angleRZ_%d", parameters._step);
       m_search_cell_angleRZ.push_back(new TH1F(hname, ";Cell angleRZ;Cells", 1e3, 0., 0.1));
-      sprintf(hname, "search_slopeZ_%d", parameters._step);
+      sprintf(hname, "search_cell_slopeZ_%d", parameters._step);
       m_search_cell_slopeZ.push_back(new TH1F(hname, ";slopeZ;Cells", 2e3, -20, 20));
-      sprintf(hname, "search_length_%d", parameters._step);
+      sprintf(hname, "search_cell_length_%d", parameters._step);
       m_search_cell_length.push_back(new TH1F(hname, ";Length;Cells", 1e3, 0., 0.1));
-      sprintf(hname, "search_nClusters_%d", parameters._step);
+      sprintf(hname, "search_track_nClusters_%d", parameters._step);
       m_search_track_nClusters.push_back(new TH1F(hname, ";# clusters;Conformal tracks", 30, 0, 30));
-      sprintf(hname, "search_chi2_%d", parameters._step);
+      sprintf(hname, "search_nTracks_%d", parameters._step);
+      m_search_nTracks.push_back(new TH1F(hname, ";# tracks;Events", 30, 0, 30));
+      sprintf(hname, "search_track_chi2_%d", parameters._step);
       m_search_track_chi2.push_back(new TH1F(hname, ";#chi^{2}/NDF;Conformal tracks", 2e3, 0, 200));
-      sprintf(hname, "search_chi2ZS_%d", parameters._step);
+      sprintf(hname, "search_track_chi2ZS_%d", parameters._step);
       m_search_track_chi2ZS.push_back(new TH1F(hname, ";#chi^{2}_{ZS}/NDF;Conformal tracks", 2e3, 0, 200));
 
     }
@@ -649,12 +652,15 @@ void ConformalTracking::processEvent(LCEvent* evt) {
     streamlog_out(DEBUG9) << "STEP " << parameters._step << ": nr tracks = " << conformalTracks.size() << std::endl;
 
     // Filling debug plots with track/cell properties
-    if (m_debugPlots) {
+    if (m_debugSteps) {
+      m_search_nTracks.at(parameters._step)->Fill(conformalTracks.size());
       for (auto const& confTrack : conformalTracks) {
         m_search_track_nClusters.at(parameters._step)->Fill(confTrack->m_clusters.size());
         m_search_track_chi2.at(parameters._step)->Fill(confTrack->chi2ndof());
         m_search_track_chi2ZS .at(parameters._step)->Fill(confTrack->chi2ndofZS());
         if (confTrack->m_clusters.size() < 3) continue;
+        // Sort the hits from larger to smaller radius
+        std::sort(confTrack->m_clusters.begin(), confTrack->m_clusters.end(), sort_by_radiusKD);
         // Creating cells for each pair of consecutive hits in the track
         SCell cell0 = nullptr;
         SCell cell1 = nullptr;

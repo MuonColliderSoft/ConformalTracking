@@ -207,6 +207,7 @@ protected:
   std::vector<TH1F*> m_search_track_nClusters{};
   std::vector<TH1F*> m_search_track_chi2{};
   std::vector<TH1F*> m_search_track_chi2ZS{};
+  std::vector<TH1F*> m_search_nTracks{};
 
   // Timing histograms
   std::vector<TH1F*> m_timing_buildNewTracks{};
@@ -235,6 +236,7 @@ protected:
   bool              m_enableTCVC                 = true;
   bool              m_debugPlots                 = false;
   bool              m_debugTime                  = false;
+  bool              m_debugSteps                 = false;
   bool              m_retryTooManyTracks         = true;
   bool              m_sortTreeResults            = true;
   double            m_purity                     = 0.0;
