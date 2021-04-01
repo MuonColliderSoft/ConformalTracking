@@ -155,6 +155,7 @@ protected:
   TH1F* m_slopeZ_true       = nullptr;
   TH1F* m_slopeZ_true_first = nullptr;
   TH2F* m_slopeZ_vs_pt_true = nullptr;
+  TH1F* m_distance          = nullptr;
 
   TH1F* m_cellAngle           = nullptr;
   TH1F* m_cellDOCA            = nullptr;
@@ -229,6 +230,8 @@ protected:
   double            m_maxDistance                = 0.0;
   double            m_slopeZRange                = 1000.0;
   double            m_highPTcut                  = 0.0;
+  double            m_maxHitAngle                = 3.1415927;
+  double            m_minHitAngle                = 0.0;
   int               m_minClustersOnTrack         = 0;
   int               m_minClustersOnTrackAfterFit = 0;
   int               m_maxHitsInvFit              = 0;
