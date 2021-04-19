@@ -15,6 +15,9 @@
 #include <EVENT/TrackerHit.h>
 #include "lcio.h"
 
+#include <EVENT/ReconstructedParticle.h>
+#include "IMPL/ReconstructedParticleImpl.h"
+
 #include <MarlinTrk/IMarlinTrkSystem.h>
 
 #include <TCanvas.h>
@@ -128,6 +131,8 @@ protected:
   std::vector<int>         m_vertexEndcapHits{};
   std::vector<int>         m_vertexCombinedHits{};
 
+  std::string m_inputJetCaloCollName{};
+
   // Run and event counters
   int m_eventNumber = 0;
   int m_runNumber   = 0;
@@ -143,6 +148,8 @@ protected:
   double m_initialTrackError_tanL  = 0.0;
   double m_maxChi2perHit           = 0.0;
   double m_magneticField           = 0.0;
+
+  double m_deltaRCut               = 1.0; 
 
   // Histograms
   TH1F* m_X                 = nullptr;
@@ -248,6 +255,27 @@ protected:
   std::map<SKDCluster, MCParticle*>    kdParticles{};  // Link from conformal hit to MC particle
   std::map<SKDCluster, SimTrackerHit*> kdSimHits{};    // Link from conformal hit to SimHit
 };
+
+// DeltaR distance between a point and a vector
+inline double deltaR_fun(TrackerHitPlane* hit, ReconstructedParticle* part) {
+ 
+  // Calculate jet's variables	
+  double jet_p = sqrt( pow(part->getMomentum()[0],2) + pow(part->getMomentum()[1],2) + pow(part->getMomentum()[2],2)  );
+  double jet_theta = acos(part->getMomentum()[2]/jet_p);
+  double jet_eta = -std::log(tan(jet_theta/2));
+  double jet_pxy = sqrt( pow(part->getMomentum()[0],2) + pow(part->getMomentum()[1],2) );
+
+  // Calculate hit's variables
+  double hit_d = sqrt( pow(hit->getPosition()[0],2) + pow(hit->getPosition()[1],2) + pow(hit->getPosition()[2],2)  );
+  double hit_theta = acos(hit->getPosition()[2]/hit_d);
+  double hit_eta = -std::log(tan(hit_theta/2));
+  double hit_dxy = sqrt( pow(hit->getPosition()[0],2) + pow(hit->getPosition()[1],2) );
+  // deltas hit vs jet
+  double deltaPhi = acos( (part->getMomentum()[0]*hit->getPosition()[0] + part->getMomentum()[1]*hit->getPosition()[1] )/jet_pxy/hit_dxy);
+  double deltaR = sqrt( pow(deltaPhi,2) + pow(jet_eta-hit_eta,2)  );
+
+  return deltaR;
+}
 
 // ---------------------------
 // SORT FUNCTIONS
