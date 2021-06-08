@@ -15,6 +15,7 @@ struct Parameters {
 
 public:
   std::vector<int> _collections;  /// which collections to combine
+  std::vector<int> _seedCollections;  /// which collections to use for seeding
   double           _maxCellAngle;
   double           _maxCellAngleRZ;
   double           _chi2cut;
@@ -47,11 +48,12 @@ public:
       "MaxCellAngle", "MaxCellAngleRZ", "Chi2Cut", "MinClustersOnTrack", "MaxDistance", "SlopeZRange", "HighPTCut",
   };
 
-  Parameters(std::vector<int> const& collections, double maxCellAngle, double maxCellAngleRZ, double chi2cut,
+  Parameters(std::vector<int> const& collections, std::vector<int> const& seedCollections, double maxCellAngle, double maxCellAngleRZ, double chi2cut,
              int minClustersOnTrack, double maxDistance, double maxSlopeZ, double highPTcut, bool highPTfit,
              bool onlyZSchi2cut, bool radialSearch, bool vertexToTracker, bool kalmanFitForward, int step, bool combine,
              bool build, bool extend, bool sortTracks)
       : _collections(collections),
+        _seedCollections(seedCollections),
         _maxCellAngle(maxCellAngle),
         _maxCellAngleRZ(maxCellAngleRZ),
         _chi2cut(chi2cut),
