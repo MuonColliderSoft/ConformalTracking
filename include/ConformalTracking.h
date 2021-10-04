@@ -131,7 +131,7 @@ protected:
   std::vector<int>         m_vertexEndcapHits{};
   std::vector<int>         m_vertexCombinedHits{};
 
-  std::string m_inputJetCaloCollName{};
+  std::string              m_inputJetCaloCollName{};
 
   // Run and event counters
   int m_eventNumber = 0;

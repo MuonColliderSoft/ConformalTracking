@@ -143,7 +143,7 @@ void ConformalTracking::registerParameters() {
   registerProcessorParameter("MaxHitAngle", "Maximum polar angle of hits to be fitted", m_maxHitAngle, double(3.1415927));
   registerProcessorParameter("MinHitAngle", "Minimum polar angle of hits to be fitted", m_minHitAngle, double(0.));
   // Parameters for tracking inside cones
-  registerProcessorParameter("JetCaloCollection", "Name of the JetCalo collection", m_inputJetCaloCollName, std::string("JetCalo") );
+  registerProcessorParameter("JetCaloCollection", "Name of the JetCalo collection", m_inputJetCaloCollName, std::string("") );
   registerProcessorParameter("DeltaRCut" , "Maximum angular distance between the hits and the particle direction" , m_deltaRCut,
                              double(1.) );
 }
@@ -469,9 +469,10 @@ void ConformalTracking::processEvent(LCEvent* evt) {
   try {
     m_inputJetCalo = evt->getCollection( m_inputJetCaloCollName );
     njet = m_inputJetCalo->getNumberOfElements();
+    streamlog_out(MESSAGE9) << "Number of cones: " << njet << std::endl;
   }
   catch( lcio::DataNotAvailableException& e ) {
-    streamlog_out(WARNING) << m_inputJetCaloCollName << " collection not available. Use default tracking." << std::endl;
+    streamlog_out(WARNING) << "(Jet)Cone's collection not available. Use default tracking." << std::endl;
     coneTracking = false;
   }
   
@@ -488,7 +489,7 @@ void ConformalTracking::processEvent(LCEvent* evt) {
       go = false;
     } else {
       part = dynamic_cast<ReconstructedParticle*>( m_inputJetCalo->getElementAt(ipart) );
-      streamlog_out(MESSAGE9) << "Jet momentum: (" << part->getMomentum()[0] << 
+      streamlog_out(MESSAGE9) << "Cone's momentum: (" << part->getMomentum()[0] << 
                               "," << part->getMomentum()[1] << 
                               "," << part->getMomentum()[2] << 
                               ")" << std::endl;
@@ -504,6 +505,11 @@ void ConformalTracking::processEvent(LCEvent* evt) {
         // Get the hit
         TrackerHitPlane* hit = dynamic_cast<TrackerHitPlane*>(trackerHitCollections[collection]->getElementAt(itHit));
 
+        // Select hits in the region of interest
+        double theta_hit = atan2(sqrt(hit->getPosition()[0]*hit->getPosition()[0]+hit->getPosition()[1]*hit->getPosition()[1]),
+                                      hit->getPosition()[2]);
+        if ( theta_hit<m_minHitAngle || theta_hit>m_maxHitAngle ) continue;
+
         // select hits inside the cone 
         if ( coneTracking ) {
           // Cone tracking: skip hits that are in the opposite hemisphere w.r.t. the jet axis:
@@ -512,21 +518,18 @@ void ConformalTracking::processEvent(LCEvent* evt) {
             hit->getPosition()[2]*part->getMomentum()[2] ) < 0. ) continue;
       
           double deltaR = deltaR_fun(hit,part);
+          // skip hit outside the cone
+          if ( deltaR > m_deltaRCut ) continue;
           // check if hit belongs to previous jets
           bool prev_flag = false;
           for (int jpart=0; jpart<ipart-1; ++jpart) {
             ReconstructedParticle* part_prev = dynamic_cast<ReconstructedParticle*>( m_inputJetCalo->getElementAt(jpart) );
-            if ( deltaR_fun(hit,part_prev) <= m_deltaRCut) prev_flag = true;
+            if ( deltaR_fun(hit,part_prev) <= m_deltaRCut ) prev_flag = true;
           }
           // cone filter
-          if ( deltaR > m_deltaRCut || prev_flag==true) continue;
+          if ( prev_flag==true ) continue;
         } // end coneTracking
       
-        // Select hits in the region of interest
-        double theta_hit = atan2(sqrt(hit->getPosition()[0]*hit->getPosition()[0]+hit->getPosition()[1]*hit->getPosition()[1]),
-                                      hit->getPosition()[2]);
-        if ( theta_hit<m_minHitAngle || theta_hit>m_maxHitAngle ) continue;
-
         // Get subdetector information and check if the hit is in the barrel or endcaps
         const int celId = hit->getCellID0();
         m_encoder.setValue(celId);
@@ -578,7 +581,7 @@ void ConformalTracking::processEvent(LCEvent* evt) {
         } // end debug
       }
       collectionClusters[collection] = tempClusters;
-      streamlog_out(MESSAGE9) << "Added collection with " << tempClusters.size() << " hits" << std::endl;
+      streamlog_out(DEBUG3) << "Added collection with " << tempClusters.size() << " hits" << std::endl;
     }
 
     // WHAT TO DO ABOUT THIS?? POSSIBLY MOVE DEPENDING ON MC RECONSTRUCTION (and in fact, would fit better into the check reconstruction code at present)
@@ -680,7 +683,7 @@ void ConformalTracking::processEvent(LCEvent* evt) {
       }
 
       // Draw the final set of conformal hits (on top of the cell lines)
-      if (m_eventNumber == 0) {
+      if (m_eventNumber == 0 && m_debugPlots) {
         m_canvConformalEventDisplayMC->cd();
         m_conformalEventsMC->DrawCopy("same");
         // Draw the non-MC event display
