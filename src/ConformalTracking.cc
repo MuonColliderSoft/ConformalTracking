@@ -142,6 +142,10 @@ void ConformalTracking::registerParameters() {
                              int(0));
   registerProcessorParameter("MaxHitAngle", "Maximum polar angle of hits to be fitted", m_maxHitAngle, double(3.1415927));
   registerProcessorParameter("MinHitAngle", "Minimum polar angle of hits to be fitted", m_minHitAngle, double(0.));
+  // Parameters for tracking inside cones
+  registerProcessorParameter("JetCaloCollection", "Name of the JetCalo collection", m_inputJetCaloCollName, std::string("") );
+  registerProcessorParameter("DeltaRCut" , "Maximum angular distance between the hits and the particle direction" , m_deltaRCut,
+                             double(1.) );
 }
 
 void ConformalTracking::init() {
@@ -457,263 +461,314 @@ void ConformalTracking::processEvent(LCEvent* evt) {
     m_debugger.setRelations(relations);
   }
 
-  // Create the conformal hit collections for each tracker hit collection (and save the link)
-  for (unsigned int collection = 0; collection < trackerHitCollections.size(); collection++) {
-    // Loop over tracker hits and make conformal hit collection
-    SharedKDClusters tempClusters;
-    int              nHits = trackerHitCollections[collection]->getNumberOfElements();
-    for (int itHit = 0; itHit < nHits; itHit++) {
-      // Get the hit
-      TrackerHitPlane* hit = dynamic_cast<TrackerHitPlane*>(trackerHitCollections[collection]->getElementAt(itHit));
-
-      // Select hits in the region of interest
-      double theta_hit = atan2(sqrt(hit->getPosition()[0]*hit->getPosition()[0]+hit->getPosition()[1]*hit->getPosition()[1]),
-             hit->getPosition()[2]);
-      if ( theta_hit<m_minHitAngle || theta_hit>m_maxHitAngle ) continue;
-
-      // Get subdetector information and check if the hit is in the barrel or endcaps
-      const int celId = hit->getCellID0();
-      m_encoder.setValue(celId);
-      int  subdet   = m_encoder[lcio::LCTrackerCellID::subdet()];
-      int  side     = m_encoder[lcio::LCTrackerCellID::side()];
-      int  layer    = m_encoder[lcio::LCTrackerCellID::layer()];
-      int  module   = m_encoder[lcio::LCTrackerCellID::module()];
-      int  sensor   = m_encoder[lcio::LCTrackerCellID::sensor()];
-      bool isEndcap = false;
-      bool forward  = false;
-      if (side != ILDDetID::barrel) {
-        isEndcap = true;
-        if (side == ILDDetID::fwd)
-          forward = true;
-      }
-
-      // Make a new kd cluster
-      auto kdhit = std::make_shared<KDCluster>(hit, isEndcap, forward);
-
-      // Set the subdetector information
-      kdhit->setDetectorInfo(subdet, side, layer, module, sensor);
-
-      // Store the link between the two
-      kdClusterMap[kdhit] = hit;
-      conformalHits[hit]  = kdhit;
-      tempClusters.push_back(kdhit);
-
-      // Store the MC link if in debug mode
-      if (m_debugPlots) {
-        // Get the related simulated hit(s)
-        const LCObjectVec& simHitVector = relations[collection]->getRelatedToObjects(hit);
-        // Take the first hit only (TODO: this should be changed? Loop over all related simHits and add an entry for each mcparticle so that this hit is in each fit?)
-        SimTrackerHit* simHit = dynamic_cast<SimTrackerHit*>(simHitVector.at(0));
-        // Get the particle belonging to that hit
-        MCParticle* particle = simHit->getMCParticle();
-        // Store the information (not for secondaries)
-        kdParticles[kdhit] = particle;
-        kdSimHits[kdhit]   = simHit;
-        if (!simHit->isProducedBySecondary()) {
-          particleHits[particle].push_back(kdhit);
-        }
-        m_debugger.registerHit(collection, kdhit, hit);
-        // Draw plots for event 0
-        if (m_eventNumber == 0) {
-          m_conformalEvents->Fill(kdhit->getU(), kdhit->getV());
-          m_nonconformalEvents->Fill(hit->getPosition()[0], hit->getPosition()[1]);
-          m_conformalEventsRTheta->Fill(kdhit->getR(), kdhit->getTheta());
-        }
-        // Set debug hit if required
-        //        if (kdhit->getX() < (-537.4) && kdhit->getX() > (-537.5) && kdhit->getY() < (-144.5) && kdhit->getY() > (-144.6))
-        //          debugSeed = kdhit;
-      }
-    }
-    collectionClusters[collection] = tempClusters;
+  // Get the JetCalo collection if defined
+  bool coneTracking = true;
+  LCCollection* m_inputJetCalo = NULL;
+  ReconstructedParticle* part = NULL;
+  int njet = 1;
+  try {
+    m_inputJetCalo = evt->getCollection( m_inputJetCaloCollName );
+    njet = m_inputJetCalo->getNumberOfElements();
+    streamlog_out(MESSAGE9) << "Number of cones: " << njet << std::endl;
   }
-
-  // WHAT TO DO ABOUT THIS?? POSSIBLY MOVE DEPENDING ON MC RECONSTRUCTION (and in fact, would fit better into the check reconstruction code at present)
-
-  // Now loop over all MC particles and make the cells connecting hits
-  if (m_debugPlots) {
-    int nParticles = particleCollection->getNumberOfElements();
-    for (int itP = 0; itP < nParticles; itP++) {
-      // Get the particle
-      MCParticle* mcParticle = dynamic_cast<MCParticle*>(particleCollection->getElementAt(itP));
-      // Get the vector of hits from the container
-      if (particleHits.count(mcParticle) == 0)
-        continue;
-      SharedKDClusters trackHits = m_debugger.getAssociatedHits(mcParticle);  //particleHits[mcParticle];
-      // Only make tracks with n or more hits
-      if (trackHits.size() < (unsigned int)m_minClustersOnTrack)
-        continue;
-      // Discard low momentum particles
-      double particlePt = sqrt(mcParticle->getMomentum()[0] * mcParticle->getMomentum()[0] +
-                               mcParticle->getMomentum()[1] * mcParticle->getMomentum()[1]);
-      // Cut on stable particles
-      if (mcParticle->getGeneratorStatus() != 1)
-        continue;
-      // Sort the hits from larger to smaller radius
-      std::sort(trackHits.begin(), trackHits.end(), sort_by_radiusKD);
-
-      // Make a track
-      auto pars    = _stepParameters[0];
-      auto mcTrack = std::unique_ptr<KDTrack>(new KDTrack(pars));
-      // Loop over all hits for debugging
-      for (auto const& cluster : trackHits) {
-        // Get the conformal clusters
-        mcTrack->add(cluster);
-      }
-
-      // Fit the track and plot the chi2
-      mcTrack->linearRegression();
-      mcTrack->linearRegressionConformal();
-      m_conformalChi2MC->Fill(mcTrack->chi2ndof());
-      m_conformalChi2PtMC->Fill(mcTrack->chi2ndof(), particlePt);
-      m_conformalChi2SzMC->Fill(mcTrack->chi2ndofZS());
-      m_conformalChi2SzPtMC->Fill(mcTrack->chi2ndofZS(), particlePt);
-
-      double mcVertexX = mcParticle->getVertex()[0];
-      double mcVertexY = mcParticle->getVertex()[1];
-      double mcVertexR = sqrt(pow(mcVertexX, 2) + pow(mcVertexY, 2));
-      m_conformalChi2VertexRMC->Fill(mcTrack->chi2ndof(), mcVertexR);
-      m_conformalChi2SzVertexRMC->Fill(mcTrack->chi2ndofZS(), mcVertexR);
-
-      // Now loop over the hits and make cells - filling histograms along the way
-      int nHits = trackHits.size();
-      for (int itHit = 0; itHit < (nHits - 2); itHit++) {
-        // Get the conformal clusters
-        SKDCluster cluster0 = trackHits[itHit];
-        SKDCluster cluster1 = trackHits[itHit + 1];
-        SKDCluster cluster2 = trackHits[itHit + 2];
-
-        // Make the two cells connecting these three hits
-        auto cell = std::make_shared<Cell>(cluster0, cluster1);
-        cell->setWeight(itHit);
-        auto cell1 = std::make_shared<Cell>(cluster1, cluster2);
-        cell1->setWeight(itHit + 1);
-
-        if (itHit == 0)
-          m_cellDOCAMC->Fill(cell->doca());
-
-        // Fill the debug/tuning plots
-        double angleBetweenCells   = cell->getAngle(cell1);
-        double angleRZBetweenCells = cell->getAngleRZ(cell1);
-        double cell0Length = sqrt(pow(cluster0->getU() - cluster1->getU(), 2) + pow(cluster0->getV() - cluster1->getV(), 2));
-        double cell1Length = sqrt(pow(cluster1->getU() - cluster2->getU(), 2) + pow(cluster1->getV() - cluster2->getV(), 2));
-
-        m_cellAngleMC->Fill(angleBetweenCells);
-        m_cellAngleRadiusMC->Fill(cluster2->getR(), angleBetweenCells);
-        m_cellLengthRadiusMC->Fill(cluster0->getR(), cell0Length);
-        m_cellAngleLengthMC->Fill(cell1Length, angleBetweenCells);
-        m_cellAngleRZMC->Fill(angleRZBetweenCells);
-
-        // Draw cells on the first event
-        if (m_eventNumber == 0) {
-          // Fill the event display (hit positions)
-          m_conformalEventsMC->Fill(cluster0->getU(), cluster0->getV());
-          m_conformalEventsMC->Fill(cluster1->getU(), cluster1->getV());
-          m_conformalEventsMC->Fill(cluster2->getU(), cluster2->getV());
-          // Draw the cell lines on the event display. Use the line style to show
-          // if the cells would have been cut by some of the search criteria
-          m_canvConformalEventDisplayMC->cd();
-          if (itHit == 0) {
-            drawline(cluster0, cluster1, itHit + 1);
-          }
-          // Draw line style differently if the cell angle was too large
-          if (angleBetweenCells > (m_maxCellAngle)) {
-            drawline(cluster1, cluster2, itHit + 2, 3);
-          } else {
-            drawline(cluster1, cluster2, itHit + 2);
-          }
-        }
-      }
-    }
+  catch( lcio::DataNotAvailableException& e ) {
+    streamlog_out(WARNING) << "(Jet)Cone's collection not available. Use default tracking." << std::endl;
+    coneTracking = false;
   }
-
-  // Draw the final set of conformal hits (on top of the cell lines)
-  if (m_eventNumber == 0 && m_debugPlots) {
-    m_canvConformalEventDisplayMC->cd();
-    m_conformalEventsMC->DrawCopy("same");
-    // Draw the non-MC event display
-    m_canvConformalEventDisplay->cd();
-    m_conformalEvents->DrawCopy("");
-    m_canvConformalEventDisplayAllCells->cd();
-    m_conformalEvents->DrawCopy("");
-    m_canvConformalEventDisplayAcceptedCells->cd();
-    m_conformalEvents->DrawCopy("");
-    m_canvConformalEventDisplayMC->cd();
-    m_conformalEvents->DrawCopy("");
-    m_canvConformalEventDisplayMCunreconstructed->cd();
-    m_conformalEvents->DrawCopy("");
-  }
-
-  // END OF "WHAT TO DO ABOUT THIS??"
-
-  //------------------------------------------------------------------------------
-  // Now the track reconstruction strategy. Perform a sequential search, with hits
-  // removed from the seeding collections once tracks have been built
-  //------------------------------------------------------------------------------
-
+  
   // The final vector of conformal tracks
   UniqueKDTracks   conformalTracks;
   SharedKDClusters kdClusters;
   UKDTree          nearestNeighbours = nullptr;
 
-  for (auto const& parameters : _stepParameters) {
-    runStep(kdClusters, nearestNeighbours, conformalTracks, collectionClusters, parameters);
-    streamlog_out(MESSAGE9) << "STEP " << parameters._step << ": nr tracks = " << conformalTracks.size() << std::endl;
+  int ipart = 0;
+  bool go = true;
+  // Loop over jet particles if defined
+  while ( go && ipart < njet ) {
+    if ( not coneTracking ) {
+      go = false;
+    } else {
+      part = dynamic_cast<ReconstructedParticle*>( m_inputJetCalo->getElementAt(ipart) );
+      streamlog_out(MESSAGE9) << "Cone's momentum: (" << part->getMomentum()[0] << 
+                              "," << part->getMomentum()[1] << 
+                              "," << part->getMomentum()[2] << 
+                              ")" << std::endl;
+      ipart++;
+    }
 
-    // Filling debug plots with track/cell properties
-    if (m_debugSteps) {
-      m_search_nTracks.at(parameters._step)->Fill(conformalTracks.size());
-      for (auto const& confTrack : conformalTracks) {
-        m_search_track_nClusters.at(parameters._step)->Fill(confTrack->m_clusters.size());
-        m_search_track_chi2.at(parameters._step)->Fill(confTrack->chi2ndof());
-        m_search_track_chi2ZS .at(parameters._step)->Fill(confTrack->chi2ndofZS());
-        if (confTrack->m_clusters.size() < 3) continue;
-        // Sort the hits from larger to smaller radius
-        std::sort(confTrack->m_clusters.begin(), confTrack->m_clusters.end(), sort_by_radiusKD);
-        // Creating cells for each pair of consecutive hits in the track
-        SCell cell0 = nullptr;
-        SCell cell1 = nullptr;
-        for (unsigned int ht = 0; ht < confTrack->m_clusters.size()-1; ht++) {
-          // Get the conformal clusters
-          const SKDCluster& cl0 = confTrack->m_clusters.at(ht);
-          const SKDCluster& cl1 = confTrack->m_clusters.at(ht+1);
+    // Create the conformal hit collections for each tracker hit collection (and save the link)
+    for (unsigned int collection = 0; collection < trackerHitCollections.size(); collection++) {
+      // Loop over tracker hits and make conformal hit collection
+      SharedKDClusters tempClusters;
+      int              nHits = trackerHitCollections[collection]->getNumberOfElements();
+      for (int itHit = 0; itHit < nHits; itHit++) {
+        // Get the hit
+        TrackerHitPlane* hit = dynamic_cast<TrackerHitPlane*>(trackerHitCollections[collection]->getElementAt(itHit));
 
-          // Calculating slopeZ between the two hits
-          double dX = cl1->getX() - cl0->getX();
-          double dY = cl1->getY() - cl0->getY();
-          double dZ = cl1->getZ() - cl0->getZ();
-          double slopeZ = dZ / sqrt(dX * dX + dY * dY);
-          m_search_cell_slopeZ.at(parameters._step)->Fill(slopeZ);
+        // Select hits in the region of interest
+        double theta_hit = atan2(sqrt(hit->getPosition()[0]*hit->getPosition()[0]+hit->getPosition()[1]*hit->getPosition()[1]),
+                                      hit->getPosition()[2]);
+        if ( theta_hit<m_minHitAngle || theta_hit>m_maxHitAngle ) continue;
 
-          // Making a cell connecting the two hits
-          cell1 = std::make_shared<Cell>(cl0, cl1);
-          cell1->setWeight(ht);
-
-          double cell_length = sqrt(pow(cl0->getU() - cl1->getU(), 2) + pow(cl0->getV() - cl1->getV(), 2));
-          m_search_cell_length.at(parameters._step)->Fill(cell_length);
-
-          // Calculating angles between the previous and this cell
-          if (cell0) {
-            double angle = cell0->getAngle(cell1);
-            double angleRZ = cell0->getAngleRZ(cell1);
-            m_search_cell_angle.at(parameters._step)->Fill(angle);
-            m_search_cell_angleRZ.at(parameters._step)->Fill(angleRZ);
+        // select hits inside the cone 
+        if ( coneTracking ) {
+          // Cone tracking: skip hits that are in the opposite hemisphere w.r.t. the jet axis:
+          if ( ( hit->getPosition()[0]*part->getMomentum()[0] +
+            hit->getPosition()[1]*part->getMomentum()[1] +
+            hit->getPosition()[2]*part->getMomentum()[2] ) < 0. ) continue;
+      
+          double deltaR = deltaR_fun(hit,part);
+          // skip hit outside the cone
+          if ( deltaR > m_deltaRCut ) continue;
+          // check if hit belongs to previous jets
+          bool prev_flag = false;
+          for (int jpart=0; jpart<ipart-1; ++jpart) {
+            ReconstructedParticle* part_prev = dynamic_cast<ReconstructedParticle*>( m_inputJetCalo->getElementAt(jpart) );
+            if ( deltaR_fun(hit,part_prev) <= m_deltaRCut ) prev_flag = true;
           }
-          cell0 = SCell(cell1);
+          // cone filter
+          if ( prev_flag==true ) continue;
+        } // end coneTracking
+      
+        // Get subdetector information and check if the hit is in the barrel or endcaps
+        const int celId = hit->getCellID0();
+        m_encoder.setValue(celId);
+        int  subdet   = m_encoder[lcio::LCTrackerCellID::subdet()];
+        int  side     = m_encoder[lcio::LCTrackerCellID::side()];
+        int  layer    = m_encoder[lcio::LCTrackerCellID::layer()];
+        int  module   = m_encoder[lcio::LCTrackerCellID::module()];
+        int  sensor   = m_encoder[lcio::LCTrackerCellID::sensor()];
+        bool isEndcap = false;
+        bool forward  = false;
+        if (side != ILDDetID::barrel) {
+          isEndcap = true;
+          if (side == ILDDetID::fwd)
+            forward = true;
         }
+
+        // Make a new kd cluster
+        auto kdhit = std::make_shared<KDCluster>(hit, isEndcap, forward);
+
+        // Set the subdetector information
+        kdhit->setDetectorInfo(subdet, side, layer, module, sensor);
+
+        // Store the link between the two
+        kdClusterMap[kdhit] = hit;
+        conformalHits[hit]  = kdhit;
+        tempClusters.push_back(kdhit);
+
+        // Store the MC link if in debug mode
+        if (m_debugPlots) {
+          // Get the related simulated hit(s)
+          const LCObjectVec& simHitVector = relations[collection]->getRelatedToObjects(hit);
+          // Take the first hit only (TODO: this should be changed? Loop over all related simHits and add an entry for each mcparticle so that this hit is in each fit?)
+          SimTrackerHit* simHit = dynamic_cast<SimTrackerHit*>(simHitVector.at(0));
+          // Get the particle belonging to that hit
+          MCParticle* particle = simHit->getMCParticle();
+          // Store the information (not for secondaries)
+          kdParticles[kdhit] = particle;
+          kdSimHits[kdhit]   = simHit;
+          if (!simHit->isProducedBySecondary()) {
+            particleHits[particle].push_back(kdhit);
+          }
+          m_debugger.registerHit(collection, kdhit, hit);
+          // Draw plots for event 0
+          if (m_eventNumber == 0) {
+            m_conformalEvents->Fill(kdhit->getU(), kdhit->getV());
+            m_nonconformalEvents->Fill(hit->getPosition()[0], hit->getPosition()[1]);
+            m_conformalEventsRTheta->Fill(kdhit->getR(), kdhit->getTheta());
+          }
+        } // end debug
       }
+      collectionClusters[collection] = tempClusters;
+      streamlog_out(DEBUG3) << "Added collection with " << tempClusters.size() << " hits" << std::endl;
     }
 
-    if (streamlog_level(DEBUG9)) {
-      for (auto const& confTrack : conformalTracks) {
-        streamlog_out(DEBUG9) << "- Track " << &confTrack << " has " << confTrack->m_clusters.size() << " hits" << std::endl;
-        for (unsigned int ht = 0; ht < confTrack->m_clusters.size(); ht++) {
-          SKDCluster const& kdhit = confTrack->m_clusters.at(ht);
-          streamlog_out(DEBUG9) << "-- Hit " << ht << ": [x,y,z] = [" << kdhit->getX() << ", " << kdhit->getY() << ", "
-                                << kdhit->getZ() << "]" << std::endl;
+    // WHAT TO DO ABOUT THIS?? POSSIBLY MOVE DEPENDING ON MC RECONSTRUCTION (and in fact, would fit better into the check reconstruction code at present)
+
+    // Now loop over all MC particles and make the cells connecting hits
+    if (m_debugPlots) {
+      int nParticles = particleCollection->getNumberOfElements();
+      for (int itP = 0; itP < nParticles; itP++) {
+        // Get the particle
+        MCParticle* mcParticle = dynamic_cast<MCParticle*>(particleCollection->getElementAt(itP));
+        // Get the vector of hits from the container
+        if (particleHits.count(mcParticle) == 0)
+          continue;
+        SharedKDClusters trackHits = m_debugger.getAssociatedHits(mcParticle);  //particleHits[mcParticle];
+        // Only make tracks with n or more hits
+        if (trackHits.size() < (unsigned int)m_minClustersOnTrack)
+          continue;
+        // Discard low momentum particles
+        double particlePt = sqrt(mcParticle->getMomentum()[0] * mcParticle->getMomentum()[0] +
+                                 mcParticle->getMomentum()[1] * mcParticle->getMomentum()[1]);
+        // Cut on stable particles
+        if (mcParticle->getGeneratorStatus() != 1)
+          continue;
+        // Sort the hits from larger to smaller radius
+        std::sort(trackHits.begin(), trackHits.end(), sort_by_radiusKD);
+
+        // Make a track
+        auto pars    = _stepParameters[0];
+        auto mcTrack = std::unique_ptr<KDTrack>(new KDTrack(pars));
+        // Loop over all hits for debugging
+        for (auto const& cluster : trackHits) {
+          // Get the conformal clusters
+          mcTrack->add(cluster);
+        }
+
+        // Fit the track and plot the chi2
+        mcTrack->linearRegression();
+        mcTrack->linearRegressionConformal();
+        m_conformalChi2MC->Fill(mcTrack->chi2ndof());
+        m_conformalChi2PtMC->Fill(mcTrack->chi2ndof(), particlePt);
+        m_conformalChi2SzMC->Fill(mcTrack->chi2ndofZS());
+        m_conformalChi2SzPtMC->Fill(mcTrack->chi2ndofZS(), particlePt);
+
+        double mcVertexX = mcParticle->getVertex()[0];
+        double mcVertexY = mcParticle->getVertex()[1];
+        double mcVertexR = sqrt(pow(mcVertexX, 2) + pow(mcVertexY, 2));
+        m_conformalChi2VertexRMC->Fill(mcTrack->chi2ndof(), mcVertexR);
+        m_conformalChi2SzVertexRMC->Fill(mcTrack->chi2ndofZS(), mcVertexR);
+
+        // Now loop over the hits and make cells - filling histograms along the way
+        int nHits = trackHits.size();
+        for (int itHit = 0; itHit < (nHits - 2); itHit++) {
+          // Get the conformal clusters
+          SKDCluster cluster0 = trackHits[itHit];
+          SKDCluster cluster1 = trackHits[itHit + 1];
+          SKDCluster cluster2 = trackHits[itHit + 2];
+
+          // Make the two cells connecting these three hits
+          auto cell = std::make_shared<Cell>(cluster0, cluster1);
+          cell->setWeight(itHit);
+          auto cell1 = std::make_shared<Cell>(cluster1, cluster2);
+          cell1->setWeight(itHit + 1);
+
+          if (itHit == 0)
+            m_cellDOCAMC->Fill(cell->doca());
+
+          // Fill the debug/tuning plots
+          double angleBetweenCells   = cell->getAngle(cell1);
+          double angleRZBetweenCells = cell->getAngleRZ(cell1);
+          double cell0Length = sqrt(pow(cluster0->getU() - cluster1->getU(), 2) + pow(cluster0->getV() - cluster1->getV(), 2));
+          double cell1Length = sqrt(pow(cluster1->getU() - cluster2->getU(), 2) + pow(cluster1->getV() - cluster2->getV(), 2));
+
+          m_cellAngleMC->Fill(angleBetweenCells);
+          m_cellAngleRadiusMC->Fill(cluster2->getR(), angleBetweenCells);
+          m_cellLengthRadiusMC->Fill(cluster0->getR(), cell0Length);
+          m_cellAngleLengthMC->Fill(cell1Length, angleBetweenCells);
+          m_cellAngleRZMC->Fill(angleRZBetweenCells);
+
+          // Draw cells on the first event
+          if (m_eventNumber == 0) {
+            // Fill the event display (hit positions)
+            m_conformalEventsMC->Fill(cluster0->getU(), cluster0->getV());
+            m_conformalEventsMC->Fill(cluster1->getU(), cluster1->getV());
+            m_conformalEventsMC->Fill(cluster2->getU(), cluster2->getV());
+            // Draw the cell lines on the event display. Use the line style to show
+            // if the cells would have been cut by some of the search criteria
+            m_canvConformalEventDisplayMC->cd();
+            if (itHit == 0) {
+              drawline(cluster0, cluster1, itHit + 1);
+            }
+            // Draw line style differently if the cell angle was too large
+            if (angleBetweenCells > (m_maxCellAngle)) {
+              drawline(cluster1, cluster2, itHit + 2, 3);
+            } else {
+              drawline(cluster1, cluster2, itHit + 2);
+            }
+          }
         }
       }
-    }
-  }
+
+      // Draw the final set of conformal hits (on top of the cell lines)
+      if (m_eventNumber == 0 && m_debugPlots) {
+        m_canvConformalEventDisplayMC->cd();
+        m_conformalEventsMC->DrawCopy("same");
+        // Draw the non-MC event display
+        m_canvConformalEventDisplay->cd();
+        m_conformalEvents->DrawCopy("");
+        m_canvConformalEventDisplayAllCells->cd();
+        m_conformalEvents->DrawCopy("");
+        m_canvConformalEventDisplayAcceptedCells->cd();
+        m_conformalEvents->DrawCopy("");
+        m_canvConformalEventDisplayMC->cd();
+        m_conformalEvents->DrawCopy("");
+        m_canvConformalEventDisplayMCunreconstructed->cd();
+        m_conformalEvents->DrawCopy("");
+      } 
+
+    } // END OF "WHAT TO DO ABOUT THIS??"
+
+    //------------------------------------------------------------------------------
+    // Now the track reconstruction strategy. Perform a sequential search, with hits
+    // removed from the seeding collections once tracks have been built
+    //------------------------------------------------------------------------------
+
+    nearestNeighbours.reset(nullptr);
+    kdClusters.clear();
+
+    for (auto const& parameters : _stepParameters) {
+      runStep(kdClusters, nearestNeighbours, conformalTracks, collectionClusters, parameters);
+      streamlog_out(MESSAGE9) << "STEP " << parameters._step << ": nr tracks = " << conformalTracks.size() << std::endl;
+
+      // Filling debug plots with track/cell properties
+      if (m_debugSteps) {
+        m_search_nTracks.at(parameters._step)->Fill(conformalTracks.size());
+        for (auto const& confTrack : conformalTracks) {
+          m_search_track_nClusters.at(parameters._step)->Fill(confTrack->m_clusters.size());
+          m_search_track_chi2.at(parameters._step)->Fill(confTrack->chi2ndof());
+          m_search_track_chi2ZS .at(parameters._step)->Fill(confTrack->chi2ndofZS());
+          if (confTrack->m_clusters.size() < 3) continue;
+          // Sort the hits from larger to smaller radius
+          std::sort(confTrack->m_clusters.begin(), confTrack->m_clusters.end(), sort_by_radiusKD);
+          // Creating cells for each pair of consecutive hits in the track
+          SCell cell0 = nullptr;
+          SCell cell1 = nullptr;
+          for (unsigned int ht = 0; ht < confTrack->m_clusters.size()-1; ht++) {
+            // Get the conformal clusters
+            const SKDCluster& cl0 = confTrack->m_clusters.at(ht);
+            const SKDCluster& cl1 = confTrack->m_clusters.at(ht+1);
+
+            // Calculating slopeZ between the two hits
+            double dX = cl1->getX() - cl0->getX();
+            double dY = cl1->getY() - cl0->getY();
+            double dZ = cl1->getZ() - cl0->getZ();
+            double slopeZ = dZ / sqrt(dX * dX + dY * dY);
+            m_search_cell_slopeZ.at(parameters._step)->Fill(slopeZ);
+
+            // Making a cell connecting the two hits
+            cell1 = std::make_shared<Cell>(cl0, cl1);
+            cell1->setWeight(ht);
+
+            double cell_length = sqrt(pow(cl0->getU() - cl1->getU(), 2) + pow(cl0->getV() - cl1->getV(), 2));
+            m_search_cell_length.at(parameters._step)->Fill(cell_length);
+
+            // Calculating angles between the previous and this cell
+            if (cell0) {
+              double angle = cell0->getAngle(cell1);
+              double angleRZ = cell0->getAngleRZ(cell1);
+              m_search_cell_angle.at(parameters._step)->Fill(angle);
+              m_search_cell_angleRZ.at(parameters._step)->Fill(angleRZ);
+            }
+            cell0 = SCell(cell1);
+          }
+        }
+      } // end debug
+
+      if (streamlog_level(DEBUG9)) {
+        for (auto const& confTrack : conformalTracks) {
+          streamlog_out(DEBUG9) << "- Track " << &confTrack << " has " << confTrack->m_clusters.size() << " hits" << std::endl;
+          for (unsigned int ht = 0; ht < confTrack->m_clusters.size(); ht++) {
+            SKDCluster const& kdhit = confTrack->m_clusters.at(ht);
+            streamlog_out(DEBUG9) << "-- Hit " << ht << ": [x,y,z] = [" << kdhit->getX() << ", " << kdhit->getY() << ", "
+                                  << kdhit->getZ() << "]" << std::endl;
+          }
+        }
+      } // end log debug
+    } // end steps tracking
+  } // end for on jet particles
 
   // Clean up
   nearestNeighbours.reset(nullptr);
