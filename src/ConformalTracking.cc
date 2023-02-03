@@ -429,8 +429,10 @@ void ConformalTracking::processEvent(LCEvent* evt) {
     }
   }
 
-  // Get the MC particle collection
-  getCollection(particleCollection, m_inputParticleCollection, evt);
+  if (m_debugPlots) {
+    // Get the MC particle collection
+    getCollection(particleCollection, m_inputParticleCollection, evt);
+  }
 
   // Make the output track collection
   auto trackCollection    = std::unique_ptr<LCCollectionVec>(new LCCollectionVec(LCIO::TRACK));
