@@ -1,3 +1,19 @@
+# v01-12
+
+* 2023-11-08 Leonhard Reichenbach ([PR#62](https://github.com/ilcsoft/ConformalTracking/pull/62))
+  - Emit an error message and skip further steps when too many tracks are created instead of throwing a SkipEventException
+
+# v01-11-01
+
+* 2023-05-25 Andre Sailer ([PR#60](https://github.com/iLCSoft/ConformalTracking/pull/60))
+  - ParameterParser: fix linking issue with recent versions of boost
+  - ParameterParser: move to non-deprecated header file location
+
+# v01-11
+
+* 2021-09-27 Andre Sailer ([PR#59](https://github.com/iLCSoft/ConformalTracking/pull/59))
+  - CI: Move to github actions
+
 # v01-10
 
 * 2019-10-08 Remi Ete ([PR#55](https://github.com/iLCSoft/ConformalTracking/pull/55))

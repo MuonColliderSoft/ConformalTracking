@@ -710,7 +710,12 @@ void ConformalTracking::processEvent(LCEvent* evt) {
     kdClusters.clear();
 
     for (auto const& parameters : _stepParameters) {
-      runStep(kdClusters, nearestNeighbours, conformalTracks, collectionClusters, parameters);
+      try {
+        runStep(kdClusters, nearestNeighbours, conformalTracks, collectionClusters, parameters);
+      } catch (const TooManyTracksException& e) {
+        streamlog_out(ERROR) << "Too many tracks in step: " << parameters._step << " skipping further steps" << std::endl;
+        break;
+      }
       streamlog_out(MESSAGE9) << "STEP " << parameters._step << ": nr tracks = " << conformalTracks.size() << std::endl;
 
       // Filling debug plots with track/cell properties
@@ -3200,13 +3205,13 @@ void ConformalTracking::runStep(SharedKDClusters& kdClusters, UKDTree& nearestNe
         buildNewTracks(conformalTracks, kdClusters, kdSeedClusters, nearestNeighbours, thisParameters, parameters._radialSearch,
                        parameters._vertexToTracker);
       } catch (TooManyTracksException& e) {
-        streamlog_out(MESSAGE) << "caught too many tracks, tightening parameters" << std::endl;
-        caughtException = true;
-        thisParameters.tighten();
-        if (not m_retryTooManyTracks || thisParameters._tightenStep > 10) {
+        if (not m_retryTooManyTracks || thisParameters._tightenStep >= 10) {
           streamlog_out(ERROR) << "Skipping event" << std::endl;
           throw;
         }
+        streamlog_out(MESSAGE) << "caught too many tracks, tightening parameters" << std::endl;
+        thisParameters.tighten();
+        caughtException = true;
       }
     } while (caughtException);
 
